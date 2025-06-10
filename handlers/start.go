@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -28,8 +29,8 @@ func New(bot *telebot.Bot, db *sql.DB) *BotHandlers {
 	}
 }
 
-func (h *BotHandlers) RegistrationHandler() {
-	h.bot.Handle("/start", h.startHandler)
+func (h *BotHandlers) RegistrationHaскуфndler() {
+	h.bot.Handle("/myprofile", h.startHandler)
 	h.bot.Handle(telebot.OnText, h.textHandler)
 	h.bot.Handle(telebot.OnPhoto, h.photoHandler)
 }
@@ -40,14 +41,36 @@ func (h *BotHandlers) startHandler(c telebot.Context) error {
 
 	id := int(c.Sender().ID)
 
-	result, err := h.db.Exec(fmt.Sprintf("SELECT * FROM users WHERE id_tg=%d", id))
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(result)
+	// getting profile
+	query := "SELECT name, age, gender, fav_gen, information, photo FROM users WHERE id_tg = ?"
+	row := h.db.QueryRow(query, id)
 
-	h.states[c.Sender().ID] = "name"
-	return c.Send("Привет! Я бот для знакомств. Давай создадим тебе анкету\nКак тебя зовут?")
+	var (
+		name      string
+		age       int
+		gender    string
+		choice    string
+		info      string
+		photoPath string
+	)
+
+	err := row.Scan(&name, &age, &gender, &choice, &info, &photoPath)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			fmt.Println(err)
+		}
+		h.states[c.Sender().ID] = "name"
+		return c.Send("Привет! Я бот для знакомств. Давай создадим тебе анкету\nКак тебя зовут?")
+	}
+	// getting photo
+	if _, err := os.Stat(photoPath); os.IsNotExist(err) {
+		fmt.Println("Фото не найдено")
+	}
+	// sending profile
+	return c.Send(&telebot.Photo{
+		File:    telebot.FromDisk(photoPath),
+		Caption: fmt.Sprintf("%s, %d\n\n%s", name, age, info),
+	})
 }
 
 func (h *BotHandlers) textHandler(c telebot.Context) error {
