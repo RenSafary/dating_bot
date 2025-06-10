@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"dating_bot/database"
 	"dating_bot/handlers"
 
 	"github.com/joho/godotenv"
@@ -29,7 +30,8 @@ func main() {
 		return
 	}
 
-	h := handlers.New(bot)
+	db := database.InitDB()
+	h := handlers.New(bot, db)
 	h.RegistrationHandler()
 
 	fmt.Println("Bot is started")

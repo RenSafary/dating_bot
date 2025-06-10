@@ -13,14 +13,16 @@ import (
 
 type BotHandlers struct {
 	bot      *telebot.Bot
+	db       *sql.DB
 	dataUser map[string]string
 	states   map[int64]string
 	mu       sync.Mutex
 }
 
-func New(bot *telebot.Bot) *BotHandlers {
+func New(bot *telebot.Bot, db *sql.DB) *BotHandlers {
 	return &BotHandlers{
 		bot:      bot,
+		db:       db,
 		dataUser: make(map[string]string),
 		states:   make(map[int64]string),
 	}
@@ -35,6 +37,14 @@ func (h *BotHandlers) RegistrationHandler() {
 func (h *BotHandlers) startHandler(c telebot.Context) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	id := int(c.Sender().ID)
+
+	result, err := h.db.Exec(fmt.Sprintf("SELECT * FROM users WHERE id_tg=%d", id))
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(result)
 
 	h.states[c.Sender().ID] = "name"
 	return c.Send("Привет! Я бот для знакомств. Давай создадим тебе анкету\nКак тебя зовут?")
@@ -154,13 +164,7 @@ func (h *BotHandlers) photoHandler(c telebot.Context) error {
 }
 
 func (h *BotHandlers) saveInDB(id, age int, name, gender, choice, info, photo string) error {
-	db, err := sql.Open("sqlite3", "database/db.db")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	_, err = db.Exec("INSERT INTO users (name, age, gender, fav_gen, information, photo, id_tg) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+	_, err := h.db.Exec("INSERT INTO users (name, age, gender, fav_gen, information, photo, id_tg) VALUES ($1, $2, $3, $4, $5, $6, $7)",
 		name, age, gender, choice, info, photo, id)
 	return err
 }
