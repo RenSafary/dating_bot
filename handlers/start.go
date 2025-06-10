@@ -45,16 +45,18 @@ func (h *BotHandlers) textHandler(c telebot.Context) error {
 	defer h.mu.Unlock()
 	state := h.states[c.Sender().ID]
 
+	id := c.Sender().ID
+
 	switch state {
 	case "name":
-		h.dataUser["name"] = c.Text()
+		h.dataUser[fmt.Sprintf("%d_name", id)] = c.Text()
 
-		h.states[c.Sender().ID] = "age"
+		h.states[id] = "age"
 		return c.Send("Сколько тебе лет?")
 	case "age":
-		h.dataUser["age"] = c.Text()
+		h.dataUser[fmt.Sprintf("%d_age", id)] = c.Text()
 
-		h.states[c.Sender().ID] = "gender"
+		h.states[id] = "gender"
 
 		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 		btnMale := menu.Text("Мужской ♂️")
@@ -65,8 +67,8 @@ func (h *BotHandlers) textHandler(c telebot.Context) error {
 		)
 		return c.Send("Укажи свой пол:", menu)
 	case "gender":
-		h.dataUser["gender"] = c.Text()
-		h.states[c.Sender().ID] = "choice"
+		h.dataUser[fmt.Sprintf("%d_gender", id)] = c.Text()
+		h.states[id] = "choice"
 
 		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 		btnMale := menu.Text("М")
@@ -77,8 +79,8 @@ func (h *BotHandlers) textHandler(c telebot.Context) error {
 		)
 		return c.Send("Кого хочешь искать?", menu)
 	case "choice":
-		h.dataUser["choice"] = c.Text()
-		h.states[c.Sender().ID] = "info"
+		h.dataUser[fmt.Sprintf("%d_choice", id)] = c.Text()
+		h.states[id] = "info"
 
 		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 		btnSkip := menu.Text("Пропустить")
@@ -88,8 +90,8 @@ func (h *BotHandlers) textHandler(c telebot.Context) error {
 
 		return c.Send("Напиши что-нибудь о себе", menu)
 	case "info":
-		h.dataUser["info"] = c.Text()
-		h.states[c.Sender().ID] = "photo"
+		h.dataUser[fmt.Sprintf("%d_info", id)] = c.Text()
+		h.states[id] = "photo"
 
 		return c.Send("Теперь отправь свое фото", &telebot.ReplyMarkup{RemoveKeyboard: true})
 	default:
@@ -105,11 +107,16 @@ func (h *BotHandlers) photoHandler(c telebot.Context) error {
 		return c.Send("Сначала заполните анкету!")
 	}
 	id := int(c.Sender().ID)
-	name := h.dataUser["name"]
-	age := h.dataUser["age"]
-	gender := h.dataUser["gender"]
-	choice := h.dataUser["choice"]
-	info := h.dataUser["info"]
+	name := h.dataUser[fmt.Sprintf("%d_name", id)]
+	age := h.dataUser[fmt.Sprintf("%d_age", id)]
+	gender := h.dataUser[fmt.Sprintf("%d_gender", id)]
+	choice := h.dataUser[fmt.Sprintf("%d_choice", id)]
+	info := h.dataUser[fmt.Sprintf("%d_info", id)]
+
+	// if info was skipped
+	if info == "Пропустить" {
+		info = ""
+	}
 
 	// convertation
 	age_int, err := strconv.Atoi(age)
@@ -139,7 +146,11 @@ func (h *BotHandlers) photoHandler(c telebot.Context) error {
 	if err != nil {
 		fmt.Println("Ошибка сохранения в БД:", err)
 	}
-	return c.Send("Ваша анкета готова!")
+	text := fmt.Sprintf("%s, %s\n\n%s", name, age, info)
+	return c.Send(&telebot.Photo{
+		File:    telebot.File{FileID: photo.FileID},
+		Caption: text,
+	})
 }
 
 func (h *BotHandlers) saveInDB(id, age int, name, gender, choice, info, photo string) error {
