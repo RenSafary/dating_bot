@@ -234,10 +234,10 @@ func (h *Handlers) FindProfiles(c telebot.Context) error {
 
 	menu.Reply(menu.Row(btnDislike, btnLike, btnClose))
 
-	query := "SELECT name, age, gender, fav_gen, information, photo, id_tg FROM users WHERE id_tg != ?"
-	row := h.Db.QueryRow(query, id)
+	query_users := "SELECT name, age, gender, information, photo, id_tg FROM users WHERE id_tg != ?"
+	row := h.Db.QueryRow(query_users, id)
 
-	err := row.Scan(&name, &age, &gender, &fav_gen, &info, &photoPath, &id_tg)
+	err := row.Scan(&name, &age, &gender, &info, &photoPath, &id_tg)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			h.States[id] = ""
