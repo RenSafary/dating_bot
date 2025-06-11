@@ -21,7 +21,7 @@ var (
 	name      string
 	age       int
 	gender    string
-	choice    string
+	fav_gen   string
 	info      string
 	photoPath string
 	id_tg     int
@@ -49,13 +49,12 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 	query := "SELECT name, age, gender, fav_gen, information, photo FROM users WHERE id_tg = ?"
 	row := h.Db.QueryRow(query, int(id))
 
-	err := row.Scan(&name, &age, &gender, &choice, &info, &photoPath)
+	err := row.Scan(&name, &age, &info, &photoPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			fmt.Println(err)
 		}
 		h.States[id] = "name"
-		fmt.Println(h.States[id] + "here 1")
 		return c.Send("Привет! Я бот для знакомств. Давай создадим тебе анкету\nКак тебя зовут?")
 	}
 
@@ -227,8 +226,6 @@ func (h *Handlers) FindProfiles(c telebot.Context) error {
 	defer h.Mu.Unlock()
 
 	id := c.Sender().ID
-	states := h.States[id]
-	fmt.Println(states)
 
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	btnLike := menu.Text("Like")
@@ -240,12 +237,23 @@ func (h *Handlers) FindProfiles(c telebot.Context) error {
 	query := "SELECT name, age, gender, fav_gen, information, photo, id_tg FROM users WHERE id_tg != ?"
 	row := h.Db.QueryRow(query, id)
 
-	err := row.Scan(&name, &age, &gender, &choice, &info, &photoPath, &id_tg)
+	err := row.Scan(&name, &age, &gender, &fav_gen, &info, &photoPath, &id_tg)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			h.States[id] = ""
 			return c.Send("Упс... Анкеты закончились /myprofile")
 		}
 	}
-	return c.Send("Давай найдем анкеты...", menu)
+	var text string
+	photoPath := fmt.Sprintf("%d_photo.jpg", id_tg)
+	if info != "" {
+		text = fmt.Sprintf("%s, %d", name, age)
+	} else {
+		text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
+	}
+
+	return c.Send(&telebot.Photo{
+		File:    telebot.FromDisk(photoPath),
+		Caption: text,
+	}, menu)
 }
