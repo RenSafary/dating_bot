@@ -17,6 +17,16 @@ type Handlers struct {
 	*models.BotHandlers
 }
 
+var (
+	name      string
+	age       int
+	gender    string
+	choice    string
+	info      string
+	photoPath string
+	id_tg     int
+)
+
 func NewHandlers(bot *telebot.Bot, db *sql.DB) *Handlers {
 	return &Handlers{
 		BotHandlers: models.New(bot, db),
@@ -26,6 +36,7 @@ func NewHandlers(bot *telebot.Bot, db *sql.DB) *Handlers {
 func (h *Handlers) SetupHandlers() {
 	h.Bot.Handle("/myprofile", h.StartHandler)
 	h.Bot.Handle(telebot.OnText, h.TextHandler)
+	h.Bot.Handle(telebot.OnText, h.FindProfiles)
 	h.Bot.Handle(telebot.OnPhoto, h.PhotoHandler)
 }
 
@@ -37,15 +48,6 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 
 	query := "SELECT name, age, gender, fav_gen, information, photo FROM users WHERE id_tg = ?"
 	row := h.Db.QueryRow(query, int(id))
-
-	var (
-		name      string
-		age       int
-		gender    string
-		choice    string
-		info      string
-		photoPath string
-	)
 
 	err := row.Scan(&name, &age, &gender, &choice, &info, &photoPath)
 	if err != nil {
@@ -218,4 +220,32 @@ func (h *Handlers) SaveInDB(id, age int, name, gender, choice, info, photo strin
 		name, age, gender, choice, info, photo, id,
 	)
 	return err
+}
+
+func (h *Handlers) FindProfiles(c telebot.Context) error {
+	h.Mu.Lock()
+	defer h.Mu.Unlock()
+
+	id := c.Sender().ID
+	states := h.States[id]
+	fmt.Println(states)
+
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnLike := menu.Text("Like")
+	btnDislike := menu.Text("Dislike")
+	btnClose := menu.Text("Закончить")
+
+	menu.Reply(menu.Row(btnDislike, btnLike, btnClose))
+
+	query := "SELECT name, age, gender, fav_gen, information, photo, id_tg FROM users WHERE id_tg != ?"
+	row := h.Db.QueryRow(query, id)
+
+	err := row.Scan(&name, &age, &gender, &choice, &info, &photoPath, &id_tg)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			h.States[id] = ""
+			return c.Send("Упс... Анкеты закончились /myprofile")
+		}
+	}
+	return c.Send("Давай найдем анкеты...", menu)
 }
