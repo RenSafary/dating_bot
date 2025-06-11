@@ -66,7 +66,7 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 	btnFind := menu.Text("Изменить анкету")
 	menu.Reply(menu.Row(btnChange, btnFind))
 
-	h.States[id] = "choice"
+	h.States[id] = "action"
 	return c.Send(&telebot.Photo{
 		File:    telebot.FromDisk(photoPath),
 		Caption: fmt.Sprintf("%s, %d\n\n%s", name, age, info),
@@ -120,6 +120,27 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		h.States[id] = "photo"
 
 		return c.Send("Теперь отправь свое фото", &telebot.ReplyMarkup{RemoveKeyboard: true})
+	case "action":
+		act := c.Text()
+		if act == "Поиск" {
+			h.States[id] = "find"
+		} else if act == "Изменить анкету" {
+			h.States[id] = "name"
+
+			query := "DELETE FROM users WHERE id_tg = ?"
+			_, err := h.Db.Exec(query, int(id))
+			if err != nil {
+				return fmt.Errorf("failed to delete user: %v", err)
+			}
+			photoPath := fmt.Sprintf("images/%d_photo.jpg", id)
+			err = os.Remove(photoPath)
+			if err != nil {
+				return fmt.Errorf("Failed to delete user's photo: %v", err)
+			}
+
+			return c.Send("Как тебя зовут?", &telebot.ReplyMarkup{RemoveKeyboard: true})
+		}
+		return c.Send(act)
 	default:
 		return c.Send("Что-то пошло не так.../myprofile")
 	}
@@ -179,7 +200,7 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 		return err
 	}
 
-	menu := &telebot.ReplyMarkup{}
+	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	btnChange := menu.Text("Поиск")
 	btnFind := menu.Text("Изменить анкету")
 	menu.Reply(menu.Row(btnChange, btnFind))
