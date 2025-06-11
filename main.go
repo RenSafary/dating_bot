@@ -35,11 +35,6 @@ func main() {
 	mainHandlers := handlers.NewHandlers(bot, db)
 	mainHandlers.SetupHandlers()
 
-	/*
-		findHandlers := handlers.NewHandlersF(bot, db)
-		findHandlers.SetupHandlersFind()
-	*/
-
 	fmt.Println("Bot is started")
 	bot.Start()
 }
