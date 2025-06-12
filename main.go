@@ -8,6 +8,7 @@ import (
 
 	"dating_bot/database"
 	"dating_bot/handlers"
+	"dating_bot/utils"
 
 	"github.com/joho/godotenv"
 	"gopkg.in/telebot.v3"
@@ -34,6 +35,9 @@ func main() {
 
 	mainHandlers := handlers.NewHandlers(bot, db)
 	mainHandlers.SetupHandlers()
+
+	deleteWatched := utils.DeleteHandler(bot, db)
+	deleteWatched.StartDailyCleaner()
 
 	fmt.Println("Bot is started")
 	bot.Start()
