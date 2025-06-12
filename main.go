@@ -36,6 +36,10 @@ func main() {
 	mainHandlers := handlers.NewHandlers(bot, db)
 	mainHandlers.SetupHandlers()
 
+	notiHandler := handlers.NewNotificationHandlers(bot, db)
+	notiHandler.RegisterHandlers()
+	notiHandler.StartNotificationService()
+
 	deleteWatched := utils.DeleteHandler(bot, db)
 	deleteWatched.StartDailyCleaner()
 
