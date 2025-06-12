@@ -51,7 +51,6 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 	row := h.Db.QueryRow(query, id)
 
 	err := row.Scan(&name, &age, &gender, &info, &photoPath)
-	fmt.Println(name, age, info, photoPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			fmt.Println(err)
@@ -81,7 +80,15 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 	state := h.States[c.Sender().ID]
 
 	id := c.Sender().ID
-	fmt.Println(state)
+
+	// buttons for finding profiles
+
+	find_menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnLike := find_menu.Text("Like")
+	btnDislike := find_menu.Text("Dislike")
+	btnClose := find_menu.Text("Закончить")
+
+	find_menu.Reply(find_menu.Row(btnDislike, btnLike, btnClose))
 
 	switch state {
 	case "name":
@@ -100,7 +107,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		return c.Send("Укажи свой пол:", menu)
 	case "gender":
 		h.DataUser[fmt.Sprintf("%d_gender", id)] = c.Text()
-		h.States[id] = "choice"
+		h.States[id] = "fav_gen"
 
 		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 		btnMale := menu.Text("М")
@@ -109,8 +116,8 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		menu.Reply(menu.Row(btnMale, btnFemale, btnEverybody))
 
 		return c.Send("Кого хочешь искать?", menu)
-	case "choice":
-		h.DataUser[fmt.Sprintf("%d_choice", id)] = c.Text()
+	case "fav_gen":
+		h.DataUser[fmt.Sprintf("%d_fav_gen", id)] = c.Text()
 		h.States[id] = "info"
 
 		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
@@ -125,12 +132,11 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		return c.Send("Теперь отправь свое фото", &telebot.ReplyMarkup{RemoveKeyboard: true})
 	case "action":
 		act := c.Text()
-		fmt.Println(act)
 		if act == "Поиск" {
 			h.States[id] = "find"
+			return c.Send("Ищем анкеты...", find_menu)
 		} else if act == "Изменить анкету" {
 			h.States[id] = "name"
-
 			query := "DELETE FROM users WHERE id_tg = ?"
 			_, err := h.Db.Exec(query, int(id))
 			if err != nil {
@@ -141,18 +147,10 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 			if err != nil {
 				return fmt.Errorf("Failed to delete user's photo: %v", err)
 			}
-
 			return c.Send("Как тебя зовут?", &telebot.ReplyMarkup{RemoveKeyboard: true})
 		}
-		return c.Send(act)
+		return c.Send("Неизвестная команда")
 	case "find":
-		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
-		btnLike := menu.Text("Like")
-		btnDislike := menu.Text("Dislike")
-		btnClose := menu.Text("Закончить")
-
-		menu.Reply(menu.Row(btnDislike, btnLike, btnClose))
-
 		query_users := "SELECT name, age, gender, information, photo, id_tg FROM users WHERE id_tg != ?"
 		row := h.Db.QueryRow(query_users, id)
 
@@ -174,7 +172,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		return c.Send(&telebot.Photo{
 			File:    telebot.FromDisk(photoPath),
 			Caption: text,
-		}, menu)
+		}, find_menu)
 	default:
 		return c.Send("Что-то пошло не так.../myprofile")
 	}
@@ -192,7 +190,7 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 	name = h.DataUser[fmt.Sprintf("%d_name", id)]
 	age := h.DataUser[fmt.Sprintf("%d_age", id)]
 	gender = h.DataUser[fmt.Sprintf("%d_gender", id)]
-	fav_gen = h.DataUser[fmt.Sprintf("%d_choice", id)]
+	fav_gen = h.DataUser[fmt.Sprintf("%d_fav_gen", id)]
 	info = h.DataUser[fmt.Sprintf("%d_info", id)]
 
 	if info == "Пропустить" {
