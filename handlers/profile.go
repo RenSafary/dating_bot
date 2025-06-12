@@ -36,7 +36,6 @@ func NewHandlers(bot *telebot.Bot, db *sql.DB) *Handlers {
 func (h *Handlers) SetupHandlers() {
 	h.Bot.Handle("/myprofile", h.StartHandler)
 	h.Bot.Handle(telebot.OnText, h.TextHandler)
-	h.Bot.Handle(telebot.OnText, h.FindProfiles)
 	h.Bot.Handle(telebot.OnPhoto, h.PhotoHandler)
 }
 
@@ -46,10 +45,13 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 
 	id := c.Sender().ID
 
-	query := "SELECT name, age, gender, fav_gen, information, photo FROM users WHERE id_tg = ?"
-	row := h.Db.QueryRow(query, int(id))
+	h.States[id] = "action"
 
-	err := row.Scan(&name, &age, &info, &photoPath)
+	query := "SELECT name, age, gender, information, photo FROM users WHERE id_tg = ?"
+	row := h.Db.QueryRow(query, id)
+
+	err := row.Scan(&name, &age, &gender, &info, &photoPath)
+	fmt.Println(name, age, info, photoPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			fmt.Println(err)
@@ -67,7 +69,6 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 	btnFind := menu.Text("Изменить анкету")
 	menu.Reply(menu.Row(btnChange, btnFind))
 
-	h.States[id] = "action"
 	return c.Send(&telebot.Photo{
 		File:    telebot.FromDisk(photoPath),
 		Caption: fmt.Sprintf("%s, %d\n\n%s", name, age, info),
@@ -80,6 +81,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 	state := h.States[c.Sender().ID]
 
 	id := c.Sender().ID
+	fmt.Println(state)
 
 	switch state {
 	case "name":
@@ -123,6 +125,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		return c.Send("Теперь отправь свое фото", &telebot.ReplyMarkup{RemoveKeyboard: true})
 	case "action":
 		act := c.Text()
+		fmt.Println(act)
 		if act == "Поиск" {
 			h.States[id] = "find"
 		} else if act == "Изменить анкету" {
@@ -142,6 +145,36 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 			return c.Send("Как тебя зовут?", &telebot.ReplyMarkup{RemoveKeyboard: true})
 		}
 		return c.Send(act)
+	case "find":
+		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+		btnLike := menu.Text("Like")
+		btnDislike := menu.Text("Dislike")
+		btnClose := menu.Text("Закончить")
+
+		menu.Reply(menu.Row(btnDislike, btnLike, btnClose))
+
+		query_users := "SELECT name, age, gender, information, photo, id_tg FROM users WHERE id_tg != ?"
+		row := h.Db.QueryRow(query_users, id)
+
+		err := row.Scan(&name, &age, &gender, &info, &photoPath, &id_tg)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				h.States[id] = ""
+				return c.Send("Упс... Анкеты закончились /myprofile")
+			}
+		}
+		var text string
+		photoPath := fmt.Sprintf("images/%d_photo.jpg", id_tg)
+		if info != "" {
+			text = fmt.Sprintf("%s, %d", name, age)
+		} else {
+			text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
+		}
+
+		return c.Send(&telebot.Photo{
+			File:    telebot.FromDisk(photoPath),
+			Caption: text,
+		}, menu)
 	default:
 		return c.Send("Что-то пошло не так.../myprofile")
 	}
@@ -156,11 +189,11 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 	}
 
 	id := int(c.Sender().ID)
-	name := h.DataUser[fmt.Sprintf("%d_name", id)]
+	name = h.DataUser[fmt.Sprintf("%d_name", id)]
 	age := h.DataUser[fmt.Sprintf("%d_age", id)]
-	gender := h.DataUser[fmt.Sprintf("%d_gender", id)]
-	choice := h.DataUser[fmt.Sprintf("%d_choice", id)]
-	info := h.DataUser[fmt.Sprintf("%d_info", id)]
+	gender = h.DataUser[fmt.Sprintf("%d_gender", id)]
+	fav_gen = h.DataUser[fmt.Sprintf("%d_choice", id)]
+	info = h.DataUser[fmt.Sprintf("%d_info", id)]
 
 	if info == "Пропустить" {
 		info = ""
@@ -196,7 +229,7 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 		return err
 	}
 
-	if err := h.SaveInDB(id, ageInt, name, gender, choice, info, filePath); err != nil {
+	if err := h.SaveInDB(id, ageInt, name, gender, fav_gen, info, filePath); err != nil {
 		fmt.Println("Ошибка сохранения в БД:", err)
 		return err
 	}
@@ -213,47 +246,10 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 	}, menu)
 }
 
-func (h *Handlers) SaveInDB(id, age int, name, gender, choice, info, photo string) error {
+func (h *Handlers) SaveInDB(id, age int, name, gender, fav_gen, info, photo string) error {
 	_, err := h.Db.Exec(
 		"INSERT INTO users (name, age, gender, fav_gen, information, photo, id_tg) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-		name, age, gender, choice, info, photo, id,
+		name, age, gender, fav_gen, info, photo, id,
 	)
 	return err
-}
-
-func (h *Handlers) FindProfiles(c telebot.Context) error {
-	h.Mu.Lock()
-	defer h.Mu.Unlock()
-
-	id := c.Sender().ID
-
-	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	btnLike := menu.Text("Like")
-	btnDislike := menu.Text("Dislike")
-	btnClose := menu.Text("Закончить")
-
-	menu.Reply(menu.Row(btnDislike, btnLike, btnClose))
-
-	query_users := "SELECT name, age, gender, information, photo, id_tg FROM users WHERE id_tg != ?"
-	row := h.Db.QueryRow(query_users, id)
-
-	err := row.Scan(&name, &age, &gender, &info, &photoPath, &id_tg)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			h.States[id] = ""
-			return c.Send("Упс... Анкеты закончились /myprofile")
-		}
-	}
-	var text string
-	photoPath := fmt.Sprintf("%d_photo.jpg", id_tg)
-	if info != "" {
-		text = fmt.Sprintf("%s, %d", name, age)
-	} else {
-		text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
-	}
-
-	return c.Send(&telebot.Photo{
-		File:    telebot.FromDisk(photoPath),
-		Caption: text,
-	}, menu)
 }

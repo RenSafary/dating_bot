@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"dating_bot/models"
 	"fmt"
-	"log"
 
 	"gopkg.in/telebot.v3"
 )
@@ -13,18 +12,22 @@ type HandlersNoti struct {
 	*models.BotHandlers
 }
 
-func NewHandlersNoti(bot *telebot.Bot, db *sql.DB) *Handlers {
-	return &Handlers{
+func NewHandlersNoti(bot *telebot.Bot, db *sql.DB) *HandlersNoti {
+	return &HandlersNoti{
 		BotHandlers: models.New(bot, db),
 	}
 }
 
-func (h *HandlersNoti) SetupHandlers() {
-	h.Bot.Handle("/myprofile", h.NotificationHandler)
+func (hn *HandlersNoti) SetupHandlers() {
+	hn.Bot.Handle("/notifications", hn.NotificationHandler)
 }
 
 func (hn *HandlersNoti) NotificationHandler(c telebot.Context) error {
+	hn.Mu.Lock()
+	defer hn.Mu.Unlock()
+
 	id := c.Sender().ID
+	hn.States[id] = "notifications"
 
 	var likerID int64
 	err := hn.Db.QueryRow(`
@@ -37,7 +40,18 @@ func (hn *HandlersNoti) NotificationHandler(c telebot.Context) error {
 		if err == sql.ErrNoRows {
 			return c.Send("У тебя нет уведомлений")
 		}
-		log.Fatal(err)
+		fmt.Println(err)
 	}
-	fmt.Println(id_tg)
+	var text string
+	photoPath := fmt.Sprintf("%d_photo.jpg", likerID)
+	if info != "" {
+		text = fmt.Sprintf("%s, %d", name, age)
+	} else {
+		text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
+	}
+
+	return c.Send(&telebot.Photo{
+		File:    telebot.FromDisk(photoPath),
+		Caption: text,
+	})
 }
