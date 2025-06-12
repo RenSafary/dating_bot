@@ -78,23 +78,66 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 	h.Mu.Lock()
 	defer h.Mu.Unlock()
 	state := h.States[c.Sender().ID]
-
 	id := c.Sender().ID
 
-	// buttons for finding profiles
+	findMenu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnLike := findMenu.Text("❤️")
+	btnDislike := findMenu.Text("👎")
+	btnClose := findMenu.Text("Закончить")
+	findMenu.Reply(findMenu.Row(btnDislike, btnLike, btnClose))
 
-	find_menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	btnLike := find_menu.Text("Like")
-	btnDislike := find_menu.Text("Dislike")
-	btnClose := find_menu.Text("Закончить")
+	if text := c.Text(); text == "❤️" || text == "👎" {
+		currentProfileID, err := strconv.ParseInt(h.DataUser[fmt.Sprintf("%d_current_profile", id)], 10, 64)
+		if err != nil {
+			return c.Send("Ошибка, попробуйте снова /myprofile")
+		}
 
-	find_menu.Reply(find_menu.Row(btnDislike, btnLike, btnClose))
+		if text == "❤️" {
+			err := h.HandleLike(id, currentProfileID)
+			if err != nil {
+				return c.Send("Ошибка при сохранении лайка 😢")
+			}
+
+			var isMutual bool
+			err = h.Db.QueryRow(
+				`SELECT mutually FROM liked_users WHERE user_id = ? AND liked_id = ?`,
+				id, currentProfileID,
+			).Scan(&isMutual)
+			if err != nil && err != sql.ErrNoRows {
+				return err
+			}
+
+			if isMutual {
+				c.Send("💕 У вас взаимная симпатия! Теперь вы можете написать друг другу.")
+			} else {
+				c.Send("❤️ Ты лайкнул этого пользователя!")
+			}
+		} else {
+			c.Send("👎 Дизлайк сохранен, идем дальше!")
+		}
+
+		text, photoPath, foundUserID, err := h.FindProfile(id)
+		if err != nil {
+			if err.Error() == "no more profiles" {
+				return c.Send("Упс... Анкеты закончились /myprofile")
+			}
+			return err
+		}
+
+		h.DataUser[fmt.Sprintf("%d_current_profile", id)] = fmt.Sprintf("%d", foundUserID)
+
+		return c.Send(&telebot.Photo{
+			File:    telebot.FromDisk(photoPath),
+			Caption: text,
+		}, findMenu)
+	}
 
 	switch state {
 	case "name":
 		h.DataUser[fmt.Sprintf("%d_name", id)] = c.Text()
 		h.States[id] = "age"
 		return c.Send("Сколько тебе лет?")
+
 	case "age":
 		h.DataUser[fmt.Sprintf("%d_age", id)] = c.Text()
 		h.States[id] = "gender"
@@ -105,6 +148,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		menu.Reply(menu.Row(btnMale, btnFemale))
 
 		return c.Send("Укажи свой пол:", menu)
+
 	case "gender":
 		h.DataUser[fmt.Sprintf("%d_gender", id)] = c.Text()
 		h.States[id] = "fav_gen"
@@ -115,6 +159,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		menu.Reply(menu.Row(btnMale, btnFemale))
 
 		return c.Send("Кого хочешь искать?", menu)
+
 	case "fav_gen":
 		h.DataUser[fmt.Sprintf("%d_fav_gen", id)] = c.Text()
 		h.States[id] = "info"
@@ -124,17 +169,19 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		menu.Reply(menu.Row(btnSkip))
 
 		return c.Send("Напиши что-нибудь о себе", menu)
+
 	case "info":
 		h.DataUser[fmt.Sprintf("%d_info", id)] = c.Text()
 		h.States[id] = "photo"
 
 		return c.Send("Теперь отправь свое фото", &telebot.ReplyMarkup{RemoveKeyboard: true})
+
 	case "action":
 		act := c.Text()
 		if act == "Поиск" {
 			h.States[id] = "find"
 
-			text, photoPath, err := h.FindProfile(c.Sender().ID)
+			text, photoPath, foundUserID, err := h.FindProfile(id)
 			if err != nil {
 				if err.Error() == "no more profiles" {
 					return c.Send("Упс... Анкеты закончились /myprofile")
@@ -142,27 +189,26 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 				return err
 			}
 
+			h.DataUser[fmt.Sprintf("%d_current_profile", id)] = fmt.Sprintf("%d", foundUserID)
+
 			return c.Send(&telebot.Photo{
 				File:    telebot.FromDisk(photoPath),
 				Caption: text,
-			}, find_menu)
+			}, findMenu)
 		} else if act == "Изменить анкету" {
 			h.States[id] = "name"
-			query := "DELETE FROM users WHERE id_tg = ?"
-			_, err := h.Db.Exec(query, int(id))
+			_, err := h.Db.Exec("DELETE FROM users WHERE id_tg = ?", id)
 			if err != nil {
 				return fmt.Errorf("failed to delete user: %v", err)
 			}
 			photoPath := fmt.Sprintf("images/%d_photo.jpg", id)
-			err = os.Remove(photoPath)
-			if err != nil {
-				return fmt.Errorf("Failed to delete user's photo: %v", err)
-			}
+			_ = os.Remove(photoPath)
 			return c.Send("Как тебя зовут?", &telebot.ReplyMarkup{RemoveKeyboard: true})
 		}
 		return c.Send("Неизвестная команда")
+
 	case "find":
-		text, photoPath, err := h.FindProfile(c.Sender().ID)
+		text, photoPath, foundUserID, err := h.FindProfile(id)
 		if err != nil {
 			if err.Error() == "no more profiles" {
 				return c.Send("Упс... Анкеты закончились /myprofile")
@@ -170,12 +216,15 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 			return err
 		}
 
+		h.DataUser[fmt.Sprintf("%d_current_profile", id)] = fmt.Sprintf("%d", foundUserID)
+
 		return c.Send(&telebot.Photo{
 			File:    telebot.FromDisk(photoPath),
 			Caption: text,
-		}, find_menu)
+		}, findMenu)
+
 	default:
-		return c.Send("Что-то пошло не так.../myprofile")
+		return c.Send("Что-то пошло не так... /myprofile")
 	}
 }
 
@@ -258,7 +307,7 @@ func (h *Handlers) SaveInDB(id, age int, name, gender, fav_gen, info, photo stri
 	return err
 }
 
-func (h *Handlers) FindProfile(id int64) (string, string, error) {
+func (h *Handlers) FindProfile(id int64) (string, string, int64, error) {
 	query := `
         SELECT u.name, u.age, u.information, u.photo, u.id_tg 
         FROM users u
@@ -271,13 +320,17 @@ func (h *Handlers) FindProfile(id int64) (string, string, error) {
         )
         LIMIT 1`
 
+	var name, info, photoPath string
+	var age int
+	var id_tg int64
+
 	err := h.Db.QueryRow(query, id, fav_gen, id).Scan(&name, &age, &info, &photoPath, &id_tg)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", "", fmt.Errorf("no more profiles")
+			return "", "", 0, fmt.Errorf("no more profiles")
 		}
-		return "", "", fmt.Errorf("database error: %v", err)
+		return "", "", 0, fmt.Errorf("database error: %v", err)
 	}
 
 	_, err = h.Db.Exec(`
@@ -286,7 +339,7 @@ func (h *Handlers) FindProfile(id int64) (string, string, error) {
 		id, id_tg,
 	)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to record view: %v", err)
+		return "", "", 0, fmt.Errorf("failed to record view: %v", err)
 	}
 
 	var text string
@@ -298,5 +351,45 @@ func (h *Handlers) FindProfile(id int64) (string, string, error) {
 		text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
 	}
 
-	return text, fullPhotoPath, nil
+	return text, fullPhotoPath, id_tg, nil
+}
+
+func (h *Handlers) HandleLike(userID, likedUserID int64) error {
+	var mutualLike bool
+	err := h.Db.QueryRow(`
+        SELECT EXISTS(
+            SELECT 1 FROM liked_users 
+            WHERE user_id = ? AND liked_id = ?
+        )`, likedUserID, userID).Scan(&mutualLike)
+
+	if err != nil {
+		return fmt.Errorf("failed to check mutual like: %v", err)
+	}
+
+	_, err = h.Db.Exec(`
+        INSERT INTO liked_users (user_id, liked_id, date, watched, mutually)
+        VALUES (?, ?, CURRENT_DATE, ?, ?)`,
+		userID, likedUserID, false, mutualLike,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert like: %v", err)
+	}
+
+	if mutualLike {
+		_, err = h.Db.Exec(`
+            UPDATE liked_users 
+            SET mutually = true
+            WHERE user_id = ? AND liked_id = ?`,
+			likedUserID, userID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update mutual like: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (h *Handlers) HandleDislike(userID, dislikedUserID int64) error {
+	return nil
 }
