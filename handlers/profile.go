@@ -47,10 +47,10 @@ func (h *Handlers) StartHandler(c telebot.Context) error {
 
 	h.States[id] = "action"
 
-	query := "SELECT name, age, gender, information, photo FROM users WHERE id_tg = ?"
+	query := "SELECT name, age, gender, fav_gen, information, photo FROM users WHERE id_tg = ?"
 	row := h.Db.QueryRow(query, id)
 
-	err := row.Scan(&name, &age, &gender, &info, &photoPath)
+	err := row.Scan(&name, &age, &gender, &fav_gen, &info, &photoPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			fmt.Println(err)
@@ -112,8 +112,7 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 		btnMale := menu.Text("М")
 		btnFemale := menu.Text("Ж")
-		btnEverybody := menu.Text("Без разницы")
-		menu.Reply(menu.Row(btnMale, btnFemale, btnEverybody))
+		menu.Reply(menu.Row(btnMale, btnFemale))
 
 		return c.Send("Кого хочешь искать?", menu)
 	case "fav_gen":
@@ -134,7 +133,19 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		act := c.Text()
 		if act == "Поиск" {
 			h.States[id] = "find"
-			return c.Send("Ищем анкеты...", find_menu)
+
+			text, photoPath, err := h.FindProfile(c.Sender().ID)
+			if err != nil {
+				if err.Error() == "no more profiles" {
+					return c.Send("Упс... Анкеты закончились /myprofile")
+				}
+				return err
+			}
+
+			return c.Send(&telebot.Photo{
+				File:    telebot.FromDisk(photoPath),
+				Caption: text,
+			}, find_menu)
 		} else if act == "Изменить анкету" {
 			h.States[id] = "name"
 			query := "DELETE FROM users WHERE id_tg = ?"
@@ -151,22 +162,12 @@ func (h *Handlers) TextHandler(c telebot.Context) error {
 		}
 		return c.Send("Неизвестная команда")
 	case "find":
-		query_users := "SELECT name, age, gender, information, photo, id_tg FROM users WHERE id_tg != ?"
-		row := h.Db.QueryRow(query_users, id)
-
-		err := row.Scan(&name, &age, &gender, &info, &photoPath, &id_tg)
+		text, photoPath, err := h.FindProfile(c.Sender().ID)
 		if err != nil {
-			if err == sql.ErrNoRows {
-				h.States[id] = ""
+			if err.Error() == "no more profiles" {
 				return c.Send("Упс... Анкеты закончились /myprofile")
 			}
-		}
-		var text string
-		photoPath := fmt.Sprintf("images/%d_photo.jpg", id_tg)
-		if info != "" {
-			text = fmt.Sprintf("%s, %d", name, age)
-		} else {
-			text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
+			return err
 		}
 
 		return c.Send(&telebot.Photo{
@@ -183,7 +184,7 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 	defer h.Mu.Unlock()
 
 	if h.States[c.Sender().ID] != "photo" {
-		return c.Send("Сначала заполните анкету!")
+		return c.Send("Что-то пошло не так...")
 	}
 
 	id := int(c.Sender().ID)
@@ -245,9 +246,57 @@ func (h *Handlers) PhotoHandler(c telebot.Context) error {
 }
 
 func (h *Handlers) SaveInDB(id, age int, name, gender, fav_gen, info, photo string) error {
+	if gender == "Мужской ♂️" {
+		gender = "М"
+	} else {
+		gender = "Ж"
+	}
 	_, err := h.Db.Exec(
 		"INSERT INTO users (name, age, gender, fav_gen, information, photo, id_tg) VALUES ($1, $2, $3, $4, $5, $6, $7)",
 		name, age, gender, fav_gen, info, photo, id,
 	)
 	return err
+}
+
+func (h *Handlers) FindProfile(id int64) (string, string, error) {
+	query := `
+        SELECT u.name, u.age, u.information, u.photo, u.id_tg 
+        FROM users u
+        WHERE u.id_tg != ? 
+        AND u.gender = ?
+        AND NOT EXISTS (
+            SELECT 1 FROM watched w
+            WHERE w.user_id = ?
+            AND w.another_user_id = u.id_tg
+        )
+        LIMIT 1`
+
+	err := h.Db.QueryRow(query, id, fav_gen, id).Scan(&name, &age, &info, &photoPath, &id_tg)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", fmt.Errorf("no more profiles")
+		}
+		return "", "", fmt.Errorf("database error: %v", err)
+	}
+
+	_, err = h.Db.Exec(`
+        INSERT INTO watched (user_id, another_user_id, viewed_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)`,
+		id, id_tg,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to record view: %v", err)
+	}
+
+	var text string
+	fullPhotoPath := fmt.Sprintf("images/%d_photo.jpg", id_tg)
+
+	if info == "" {
+		text = fmt.Sprintf("%s, %d", name, age)
+	} else {
+		text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
+	}
+
+	return text, fullPhotoPath, nil
 }
