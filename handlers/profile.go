@@ -309,16 +309,17 @@ func (h *Handlers) SaveInDB(id, age int, name, gender, fav_gen, info, photo stri
 
 func (h *Handlers) FindProfile(id int64) (string, string, int64, error) {
 	query := `
-        SELECT u.name, u.age, u.information, u.photo, u.id_tg 
-        FROM users u
-        WHERE u.id_tg != ? 
-        AND u.gender = ?
-        AND NOT EXISTS (
-            SELECT 1 FROM watched w
-            WHERE w.user_id = ?
-            AND w.another_user_id = u.id_tg
-        )
-        LIMIT 1`
+		SELECT u.name, u.age, u.information, u.photo, u.id_tg 
+		FROM users u
+		WHERE u.id_tg != ? 
+		AND u.gender = ?
+		AND u.age BETWEEN ? - 1 AND ? + 1
+		AND NOT EXISTS (
+			SELECT 1 FROM watched w
+			WHERE w.user_id = ?
+			AND w.another_user_id = u.id_tg
+		)
+		LIMIT 1`
 
 	var name, info, photoPath string
 	var age int
