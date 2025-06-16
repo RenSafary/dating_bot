@@ -308,12 +308,26 @@ func (h *Handlers) SaveInDB(id, age int, name, gender, fav_gen, info, photo stri
 }
 
 func (h *Handlers) FindProfile(id int64) (string, string, int64, error) {
+	var (
+		name, info, photoPath string
+		age                   int
+		foundUserID           int64
+	)
+
+	// Получаем пол и возраст текущего пользователя
+	var myGender, myFavGen string
+	var myAge int
+	err := h.Db.QueryRow("SELECT gender, fav_gen, age FROM users WHERE id_tg = ?", id).Scan(&myGender, &myFavGen, &myAge)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("ошибка при получении данных пользователя: %v", err)
+	}
+
 	query := `
 		SELECT u.name, u.age, u.information, u.photo, u.id_tg 
 		FROM users u
 		WHERE u.id_tg != ? 
 		AND u.gender = ?
-		AND u.age BETWEEN ? - 1 AND ? + 1
+		AND u.age BETWEEN ? AND ?
 		AND NOT EXISTS (
 			SELECT 1 FROM watched w
 			WHERE w.user_id = ?
@@ -321,12 +335,7 @@ func (h *Handlers) FindProfile(id int64) (string, string, int64, error) {
 		)
 		LIMIT 1`
 
-	var name, info, photoPath string
-	var age int
-	var id_tg int64
-
-	err := h.Db.QueryRow(query, id, fav_gen, id).Scan(&name, &age, &info, &photoPath, &id_tg)
-
+	err = h.Db.QueryRow(query, id, myFavGen, myAge-1, myAge+1, id).Scan(&name, &age, &info, &photoPath, &foundUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", "", 0, fmt.Errorf("no more profiles")
@@ -337,22 +346,19 @@ func (h *Handlers) FindProfile(id int64) (string, string, int64, error) {
 	_, err = h.Db.Exec(`
         INSERT INTO watched (user_id, another_user_id, viewed_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)`,
-		id, id_tg,
+		id, foundUserID,
 	)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to record view: %v", err)
 	}
 
-	var text string
-	fullPhotoPath := fmt.Sprintf("images/%d_photo.jpg", id_tg)
-
-	if info == "" {
-		text = fmt.Sprintf("%s, %d", name, age)
-	} else {
-		text = fmt.Sprintf("%s, %d\n\n%s", name, age, info)
+	text := fmt.Sprintf("%s, %d", name, age)
+	if info != "" {
+		text += "\n\n" + info
 	}
+	fullPhotoPath := fmt.Sprintf("images/%d_photo.jpg", foundUserID)
 
-	return text, fullPhotoPath, id_tg, nil
+	return text, fullPhotoPath, foundUserID, nil
 }
 
 func (h *Handlers) HandleLike(userID, likedUserID int64) error {
